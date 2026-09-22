@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coref admin - Catalogues</title>
+<style nonce="__NONCE__">
+  :root { --ink:#1f1d1a; --paper:#f6f3ee; --line:#d8d1c4; --accent:#0d3b6e; --ocean:#4da8da; --green:#2e7d4f; --amber:#d98a1f; --red:#9b1c1c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; color:var(--ink); background:var(--paper); }
+  header { padding:16px 20px; background:#fff; border-bottom:1px solid var(--line); display:flex;
+           align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+  header h1 { font-size:19px; margin:0; }
+  .brand { font-weight:800; font-size:15px; letter-spacing:.02em; }
+  #brandRow { display:flex; align-items:baseline; gap:12px; }
+  #who { font-size:13px; color:#5a554c; }
+  #who button { margin-left:10px; border:none; background:none; color:var(--accent); cursor:pointer; font:inherit; text-decoration:underline; }
+  main { padding:20px; max-width:1000px; margin:0 auto; }
+  section { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:20px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  form#upload { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+  form#upload .field { display:flex; flex-direction:column; gap:4px; font-size:13px; }
+  form#upload input, form#upload select { padding:8px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  form#upload button { padding:9px 16px; border:none; border-radius:8px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  form#upload button:disabled { opacity:.6; cursor:default; }
+  #uploadMsg { width:100%; font-size:13px; margin-top:4px; }
+  #uploadMsg.error { color:var(--red); }
+  #uploadMsg.ok { color:var(--green); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:#5a554c; font-weight:600; }
+  tr.row:hover { background:#faf6f0; cursor:pointer; }
+  .badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; }
+  .badge.completed { background:#e3f2e8; color:var(--green); }
+  .badge.processing { background:#fdf1de; color:var(--amber); }
+  .badge.failed { background:#f6e3e0; color:var(--red); }
+  .badge.other { background:#efe9df; color:#5a554c; }
+  .bar { width:80px; height:6px; background:#efe9df; border-radius:3px; overflow:hidden; }
+  .bar span { display:block; height:100%; background:var(--accent); }
+  #empty, #loading { padding:20px 0; color:#5a554c; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <div id="brandRow"><span class="brand"><span style="color:var(--accent)">C</span><span style="color:var(--ocean)">O</span><span style="color:var(--accent)">REF</span></span><h1>Catalogues</h1></div>
+  <div id="who"></div>
+</header>
+<main>
+  <section>
+    <h2>Upload a supplier catalogue</h2>
+    <form id="upload">
+      <div class="field"><label>PDF file</label><input id="file" type="file" accept="application/pdf" required></div>
+      <div class="field"><label>Name</label><input id="name" type="text" placeholder="e.g. BOGAO cheerful series" required></div>
+      <div class="field"><label>Supplier (optional)</label><select id="supplier"><option value="">&mdash; none &mdash;</option></select></div>
+      <div class="field"><label>New supplier name</label><input id="newSupplier" type="text" placeholder="leave blank to skip"></div>
+      <button id="submit" type="submit">Upload</button>
+      <div id="uploadMsg"></div>
+    </form>
+  </section>
+  <section>
+    <h2>All catalogues</h2>
+    <div id="loading">Loading&hellip;</div>
+    <div id="empty" style="display:none">No catalogues uploaded yet.</div>
+    <table id="table" style="display:none">
+      <thead><tr><th>Name</th><th>Supplier</th><th>Status</th><th>Progress</th><th>Pages</th><th>Uploaded</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+</main>
+<script nonce="__NONCE__">
+async function authFetch(url, options = {}) {
+  const opts = { credentials: "same-origin", ...options };
+  let response = await fetch(url, opts);
+  if (response.status === 401) {
+    const refreshed = await fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" });
+    if (refreshed.ok) {
+      response = await fetch(url, opts);
+    } else {
+      location.href = "/api/admin/login?next=" + encodeURIComponent(location.pathname);
+      throw new Error("not authenticated");
+    }
+  }
+  return response;
+}
+
+function statusBadgeClass(status) {
+  if (status === "COMPLETED") return "completed";
+  if (status === "PROCESSING" || status === "UPLOADED") return "processing";
+  if (status === "FAILED") return "failed";
+  return "other";
+}
+
+function row(item) {
+  const tr = document.createElement("tr");
+  tr.className = "row";
+  const uploaded = new Date(item.created_at).toLocaleString();
+  tr.innerHTML = `
+    <td>${item.name}</td>
+    <td>${item.supplier ? item.supplier.name : "&mdash;"}</td>
+    <td><span class="badge ${statusBadgeClass(item.status)}">${item.status}</span></td>
+    <td><div class="bar"><span style="width:${item.processing_progress}%"></span></div></td>
+    <td>${item.page_count ?? "&mdash;"}</td>
+    <td>${uploaded}</td>`;
+  tr.addEventListener("click", () => { location.href = `/api/admin/catalogues/${item.id}/dashboard`; });
+  return tr;
+}
+
+async function loadCatalogues() {
+  const response = await authFetch("/api/admin/catalogues?limit=100");
+  const data = await response.json();
+  document.getElementById("loading").style.display = "none";
+  const rows = document.getElementById("rows");
+  rows.innerHTML = "";
+  if (!data.items.length) {
+    document.getElementById("empty").style.display = "block";
+    document.getElementById("table").style.display = "none";
+    return;
+  }
+  document.getElementById("empty").style.display = "none";
+  document.getElementById("table").style.display = "table";
+  data.items.forEach(item => rows.appendChild(row(item)));
+}
+
+async function loadSuppliers() {
+  const response = await authFetch("/api/admin/suppliers");
+  const suppliers = await response.json();
+  const select = document.getElementById("supplier");
+  suppliers.forEach(s => {
+    const option = document.createElement("option");
+    option.value = s.id;
+    option.textContent = s.name;
+    select.appendChild(option);
+  });
+}
+
+async function loadWhoAmI() {
+  const response = await authFetch("/api/auth/me");
+  const me = await response.json();
+  document.getElementById("who").innerHTML = `${me.email} <button id="signout">Sign out</button>`;
+  document.getElementById("signout").addEventListener("click", async () => {
+    await authFetch("/api/auth/logout", { method: "POST" });
+    location.href = "/api/admin/login";
+  });
+}
+
+document.getElementById("upload").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const msg = document.getElementById("uploadMsg");
+  const submit = document.getElementById("submit");
+  msg.className = "";
+  msg.textContent = "";
+  submit.disabled = true;
+  try {
+    let supplierId = document.getElementById("supplier").value;
+    const newSupplierName = document.getElementById("newSupplier").value.trim();
+    if (newSupplierName) {
+      const created = await authFetch("/api/admin/suppliers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newSupplierName }),
+      });
+      if (!created.ok) throw new Error((await created.json()).detail || "Could not create the supplier");
+      supplierId = (await created.json()).id;
+    }
+    const form = new FormData();
+    form.append("file", document.getElementById("file").files[0]);
+    form.append("name", document.getElementById("name").value);
+    if (supplierId) form.append("supplier_id", supplierId);
+    const response = await authFetch("/api/admin/catalogues", { method: "POST", body: form });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || "Upload failed");
+    msg.className = "ok";
+    msg.textContent = `Uploaded. Processing has started for "${body.name}".`;
+    document.getElementById("upload").reset();
+    loadCatalogues();
+  } catch (error) {
+    msg.className = "error";
+    msg.textContent = typeof error.message === "string" ? error.message : "Upload failed.";
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+loadWhoAmI().catch(() => {});
+loadSuppliers().catch(() => {});
+loadCatalogues().catch(() => {});
+setInterval(() => loadCatalogues().catch(() => {}), 15000);
+</script>
+</body>
+</html>

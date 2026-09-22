@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coref admin - Sign in</title>
+<style nonce="__NONCE__">
+  :root { --ink:#1f1d1a; --paper:#f6f3ee; --line:#d8d1c4; --accent:#0d3b6e; --ocean:#4da8da; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         font-family: system-ui, "Segoe UI", sans-serif; color:var(--ink); background:var(--paper); }
+  form { background:#fff; border:1px solid var(--line); border-radius:12px; padding:28px;
+         width:100%; max-width:340px; }
+  h1 { font-size:19px; margin:0 0 18px; text-align:center; }
+  label { display:block; font-size:13px; margin:12px 0 4px; }
+  input { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  button { width:100%; margin-top:18px; padding:10px; border:none; border-radius:8px;
+           background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  .brand { font-weight:800; font-size:15px; letter-spacing:.02em; }
+  .brand { display:block; text-align:center; margin-bottom:14px; }
+  #error { color:#9b1c1c; font-size:13px; margin-top:10px; min-height:16px; }
+</style>
+</head>
+<body>
+<form id="form">
+  <div class="brand"><span style="color:var(--accent)">C</span><span style="color:var(--ocean)">O</span><span style="color:var(--accent)">REF</span></div>
+  <h1>Sign in to the admin dashboard</h1>
+  <label for="email">Email</label>
+  <input id="email" type="email" autocomplete="username" required>
+  <label for="password">Password</label>
+  <input id="password" type="password" autocomplete="current-password" required>
+  <div id="error"></div>
+  <button id="submit" type="submit">Sign in</button>
+</form>
+<script nonce="__NONCE__">
+const form = document.getElementById("form");
+const errorBox = document.getElementById("error");
+const submit = document.getElementById("submit");
+const params = new URLSearchParams(location.search);
+const next = params.get("next") || "/api/admin/dashboard";
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  errorBox.textContent = "";
+  submit.disabled = true;
+  try {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: document.getElementById("email").value,
+        password: document.getElementById("password").value,
+      }),
+    });
+    if (response.ok) {
+      location.href = next;
+      return;
+    }
+    errorBox.textContent = response.status === 403
+      ? "That account cannot use the admin dashboard."
+      : "Wrong email or password.";
+  } catch {
+    errorBox.textContent = "Could not reach the server.";
+  } finally {
+    submit.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

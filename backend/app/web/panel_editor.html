@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Panel editor</title>
+<title>Coref admin - Panel editor</title>
 <style nonce="__NONCE__">
-  :root { --ink:#1f1d1a; --paper:#f6f3ee; --line:#d8d1c4; --accent:#b84e0a; }
+  :root { --ink:#1f1d1a; --paper:#f6f3ee; --line:#d8d1c4; --accent:#0d3b6e; --ocean:#4da8da; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; color:var(--ink); background:var(--paper); }
   header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 16px; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
   header h1 { font-size:17px; margin:0 8px 0 0; }
+  .brand { font-weight:800; font-size:15px; letter-spacing:.02em; margin-right:4px; }
   button { min-height:40px; padding:0 14px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); font:inherit; font-size:14px; cursor:pointer; }
   button:hover:not(:disabled) { border-color:var(--accent); }
   button:disabled { opacity:.45; cursor:default; }
@@ -28,7 +29,7 @@
   .box.selected { border-style:dashed; }
   .box .tag { position:absolute; left:0; top:0; min-width:26px; padding:1px 7px; font:700 15px/22px system-ui, sans-serif; color:#fff; pointer-events:none; }
   .handle { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; background:#fff; border:3px solid; border-radius:50%; }
-  .draft { position:absolute; border:3px dashed var(--accent); background:rgba(184,78,10,.12); pointer-events:none; }
+  .draft { position:absolute; border:3px dashed var(--accent); background:rgba(13,59,110,.12); pointer-events:none; }
   aside { flex:0 0 300px; max-width:38vw; }
   aside h2 { font-size:15px; margin:0 0 8px; }
   #list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
@@ -37,13 +38,14 @@
   #list img { width:72px; height:54px; object-fit:cover; border-radius:6px; background:#eee; flex:none; }
   #list .chip { display:inline-block; min-width:22px; padding:0 6px; border-radius:11px; color:#fff; font-weight:700; font-size:13px; text-align:center; margin-right:6px; }
   #list .meta { font-size:12px; color:#4b463f; line-height:1.35; overflow:hidden; }
-  #list .badge { font-size:11px; padding:1px 6px; border-radius:8px; background:#fde7d3; color:#7a3306; margin-left:4px; }
+  #list .badge { font-size:11px; padding:1px 6px; border-radius:8px; background:#e3f0fa; color:var(--accent); margin-left:4px; }
   #empty { font-size:14px; color:#4b463f; }
   @media (max-width: 800px) { main { flex-direction:column; } aside { flex:none; max-width:none; width:100%; } }
 </style>
 </head>
 <body>
 <header>
+  <span class="brand"><span style="color:var(--accent)">CO</span><span style="color:var(--ocean)">REF</span></span>
   <h1>Panel editor</h1>
   <button id="prev" type="button">&lsaquo; Previous page</button>
   <span id="where">Page __PAGE_NUMBER__</span>

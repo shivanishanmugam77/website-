@@ -259,7 +259,7 @@ docker compose run --rm backend python -m app.cli.check_ocr
 | 5b-2 | Detect each product inside a panel, outline it, cut it out, remove the background | models, try-it command and the pipeline stage (finds, outlines, five pictures per product, read-only views) **implemented (this release)** |
 | 5b-3 | The same correction editor for the product cut-outs | |
 | 6 | Candidate assembly (group finds into candidates, name/code/size, confidence score, duplicate flags) | **Implemented (this release)**; size-variant merging still to build |
-| 7 | Admin review UI | |
+| 7 | Admin review UI: sign-in, catalogue dashboard, upload form, per-catalogue actions (reprocess/delete/assemble) | **Started (this release)**: login, dashboard, catalogue page. Approve/reject screens wait on Phase 8 |
 | 8 | Product approval/publish workflow | |
 | 9 | Category/supplier management | |
 | 10 | Search and filtering | |

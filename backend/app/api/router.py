@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from app.api import (
     admin,
+    admin_ui,
     auth,
     candidates,
     catalogues,
@@ -24,3 +25,4 @@ api_router.include_router(catalogues.router)
 api_router.include_router(panel_editing.router)
 api_router.include_router(product_finds.router)
 api_router.include_router(candidates.router)
+api_router.include_router(admin_ui.router)

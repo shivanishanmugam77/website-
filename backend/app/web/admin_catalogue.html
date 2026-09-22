@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coref admin - Catalogue</title>
+<style nonce="__NONCE__">
+  :root { --ink:#1f1d1a; --paper:#f6f3ee; --line:#d8d1c4; --accent:#0d3b6e; --ocean:#4da8da; --green:#2e7d4f; --amber:#d98a1f; --red:#9b1c1c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; color:var(--ink); background:var(--paper); }
+  header { padding:16px 20px; background:#fff; border-bottom:1px solid var(--line); }
+  header a { color:var(--accent); font-size:13px; text-decoration:none; }
+  .brand { font-weight:800; font-size:15px; letter-spacing:.02em; }
+  header h1 { font-size:19px; margin:6px 0 2px; }
+  header p { margin:0; font-size:13px; color:#5a554c; }
+  main { padding:20px; max-width:1000px; margin:0 auto; }
+  section { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:20px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  .row2 { display:flex; flex-wrap:wrap; gap:24px; }
+  dl { display:grid; grid-template-columns: 120px 1fr; gap:6px 10px; font-size:13px; margin:0; }
+  dt { color:#5a554c; }
+  .badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; }
+  .badge.completed { background:#e3f2e8; color:var(--green); }
+  .badge.processing { background:#fdf1de; color:var(--amber); }
+  .badge.failed { background:#f6e3e0; color:var(--red); }
+  .badge.other { background:#efe9df; color:#5a554c; }
+  .bar { width:140px; height:7px; background:#efe9df; border-radius:4px; overflow:hidden; }
+  .bar span { display:block; height:100%; background:var(--accent); }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+  button, .btn { padding:8px 14px; border:1px solid var(--line); border-radius:8px; background:#fff;
+                 color:var(--ink); font:inherit; font-size:13px; cursor:pointer; text-decoration:none; display:inline-block; }
+  button:hover, .btn:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger { color:var(--red); }
+  button:disabled { opacity:.55; cursor:default; }
+  label.chk { font-size:12px; display:flex; align-items:center; gap:5px; color:#5a554c; }
+  #actionMsg { font-size:13px; margin-top:8px; min-height:16px; }
+  #actionMsg.error { color:var(--red); }
+  #actionMsg.ok { color:var(--green); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:7px 9px; border-bottom:1px solid var(--line); }
+  th { color:#5a554c; font-weight:600; }
+  td a { color:var(--accent); margin-right:10px; font-size:12px; }
+  .links { display:flex; flex-wrap:wrap; gap:10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand" style="margin-bottom:6px"><span style="color:var(--accent)">C</span><span style="color:var(--ocean)">O</span><span style="color:var(--accent)">REF</span></div>
+  <a href="/api/admin/dashboard">&larr; All catalogues</a>
+  <h1 id="title">Loading&hellip;</h1>
+  <p id="subtitle"></p>
+</header>
+<main>
+  <section>
+    <div class="row2">
+      <dl id="details"></dl>
+    </div>
+    <div class="actions">
+      <button id="assemble" class="primary" type="button">Group into product candidates</button>
+      <a id="reviewLink" class="btn" href="#">Review products found</a>
+      <a id="panelsLink" class="btn" href="#" target="_blank">Panels overview</a>
+      <a id="productsLink" class="btn" href="#" target="_blank">Products overview</a>
+    </div>
+    <div class="actions" style="margin-top:4px">
+      <button id="reprocess" type="button">Reprocess</button>
+      <label class="chk"><input id="force" type="checkbox"> force (job seems stuck)</label>
+      <label class="chk"><input id="discard" type="checkbox"> discard manual panel corrections</label>
+      <button id="deleteBtn" class="danger" type="button" style="margin-left:auto">Delete catalogue</button>
+    </div>
+    <div id="actionMsg"></div>
+  </section>
+  <section>
+    <h2>Pages</h2>
+    <table id="pagesTable" style="display:none">
+      <thead><tr><th>#</th><th>Type</th><th>Status</th><th>Panels</th><th></th></tr></thead>
+      <tbody id="pageRows"></tbody>
+    </table>
+    <div id="pagesEmpty">No pages yet &mdash; still rendering.</div>
+  </section>
+</main>
+<script nonce="__NONCE__">
+const CATALOGUE_ID = "__CATALOGUE_ID__";
+const base = `/api/admin/catalogues/${CATALOGUE_ID}`;
+
+async function authFetch(url, options = {}) {
+  const opts = { credentials: "same-origin", ...options };
+  let response = await fetch(url, opts);
+  if (response.status === 401) {
+    const refreshed = await fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" });
+    if (refreshed.ok) {
+      response = await fetch(url, opts);
+    } else {
+      location.href = "/api/admin/login?next=" + encodeURIComponent(location.pathname);
+      throw new Error("not authenticated");
+    }
+  }
+  return response;
+}
+
+function statusBadgeClass(status) {
+  if (status === "COMPLETED") return "completed";
+  if (status === "PROCESSING" || status === "UPLOADED") return "processing";
+  if (status === "FAILED" || status === "PARTIALLY_COMPLETED") return "failed";
+  return "other";
+}
+
+let pollTimer = null;
+
+async function loadCatalogue() {
+  const response = await authFetch(base);
+  if (response.status === 404) {
+    document.getElementById("title").textContent = "Catalogue not found";
+    return;
+  }
+  const data = await response.json();
+  document.title = "Coref admin - " + data.name;
+  document.getElementById("title").textContent = data.name;
+  document.getElementById("subtitle").textContent = data.original_filename;
+  document.getElementById("details").innerHTML = `
+    <dt>Status</dt><dd><span class="badge ${statusBadgeClass(data.status)}">${data.status}</span></dd>
+    <dt>Progress</dt><dd><div class="bar"><span style="width:${data.processing_progress}%"></span></div> ${data.processing_progress}%${data.current_stage ? " &middot; " + data.current_stage : ""}</dd>
+    <dt>Supplier</dt><dd>${data.supplier ? data.supplier.name : "&mdash;"}</dd>
+    <dt>Pages</dt><dd>${data.page_count ?? "&mdash;"}</dd>
+    ${data.processing_error ? `<dt>Last error</dt><dd style="color:#9b1c1c">${data.processing_error}</dd>` : ""}
+  `;
+  document.getElementById("reviewLink").href = `${base}/candidates/review`;
+  document.getElementById("panelsLink").href = `${base}/panels/overview`;
+  document.getElementById("productsLink").href = `${base}/products/overview`;
+
+  if (!pollTimer && (data.status === "PROCESSING" || data.status === "UPLOADED")) {
+    pollTimer = setInterval(loadCatalogue, 8000);
+  }
+  if (pollTimer && data.status !== "PROCESSING" && data.status !== "UPLOADED") {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function pageRow(page) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${page.page_number}</td>
+    <td>${page.page_type}</td>
+    <td><span class="badge ${statusBadgeClass(page.status)}">${page.status}</span></td>
+    <td>${page.panel_count}</td>
+    <td class="links">
+      <a href="${base}/pages/${page.page_number}/panels/editor" target="_blank">Edit panels</a>
+      <a href="${base}/pages/${page.page_number}/text" target="_blank">View text</a>
+    </td>`;
+  return tr;
+}
+
+async function loadPages() {
+  const response = await authFetch(`${base}/pages`);
+  if (!response.ok) return;
+  const data = await response.json();
+  const rows = document.getElementById("pageRows");
+  rows.innerHTML = "";
+  if (!data.items.length) {
+    document.getElementById("pagesEmpty").style.display = "block";
+    document.getElementById("pagesTable").style.display = "none";
+    return;
+  }
+  document.getElementById("pagesEmpty").style.display = "none";
+  document.getElementById("pagesTable").style.display = "table";
+  data.items.forEach(page => rows.appendChild(pageRow(page)));
+}
+
+function showMessage(text, ok) {
+  const box = document.getElementById("actionMsg");
+  box.className = ok ? "ok" : "error";
+  box.textContent = text;
+}
+
+document.getElementById("assemble").addEventListener("click", async () => {
+  try {
+    const response = await authFetch(`${base}/candidates/assemble`, { method: "POST" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || "Could not assemble candidates");
+    showMessage(`${body.candidates_created} candidate(s) built - ${body.ready} ready, ${body.needs_review} need review.`, true);
+  } catch (error) {
+    showMessage(error.message, false);
+  }
+});
+
+document.getElementById("reprocess").addEventListener("click", async () => {
+  if (!confirm("Reprocess this catalogue from the start?")) return;
+  const force = document.getElementById("force").checked;
+  const discard = document.getElementById("discard").checked;
+  try {
+    const query = new URLSearchParams({ force: String(force), discard_corrections: String(discard) });
+    const response = await authFetch(`${base}/reprocess?${query}`, { method: "POST" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || "Could not reprocess");
+    showMessage("Reprocessing started.", true);
+    loadCatalogue();
+  } catch (error) {
+    showMessage(error.message, false);
+  }
+});
+
+document.getElementById("deleteBtn").addEventListener("click", async () => {
+  if (!confirm("Delete this catalogue permanently? This cannot be undone.")) return;
+  const force = document.getElementById("force").checked;
+  try {
+    const query = new URLSearchParams({ force: String(force) });
+    const response = await authFetch(`${base}?${query}`, { method: "DELETE" });
+    if (response.status !== 204) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || "Could not delete");
+    }
+    location.href = "/api/admin/dashboard";
+  } catch (error) {
+    showMessage(error.message, false);
+  }
+});
+
+loadCatalogue().catch(() => {});
+loadPages().catch(() => {});
+</script>
+</body>
+</html>

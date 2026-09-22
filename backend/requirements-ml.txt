@@ -1,0 +1,17 @@
+# Machine-learning dependencies (loaded only by worker processes; the API never imports them).
+# RapidOCR = PaddleOCR's Chinese+English text models running on ONNX Runtime. The models are
+# bundled in the wheel, so nothing is downloaded at runtime. onnxruntime, numpy and opencv are
+# pulled in by it and resolved by pip.
+rapidocr-onnxruntime==1.4.4
+# The panel detector (app/services/panels.py) uses numpy and OpenCV directly. rapidocr already
+# depends on both, so they are unpinned here to stay compatible with whatever it resolves.
+numpy
+opencv-python
+
+# --- product finding (Phase 5b): Grounding DINO finds things from a description, SAM outlines them.
+# torch and torchvision are installed first, as CPU-only builds, by the Dockerfile (the default
+# wheels bring ~2 GB of NVIDIA libraries); the pins below only keep them consistent.
+torch==2.5.1
+torchvision==0.20.1
+transformers==4.46.3
+timm==1.0.11

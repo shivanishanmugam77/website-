@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product preview</title>
+<style nonce="__NONCE__">
+  :root { --ink:#1f1d1a; --paper:#f6f3ee; --line:#d8d1c4; --accent:#b84e0a; --green:#2e7d4f; --amber:#d98a1f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; color:var(--ink); background:var(--paper); }
+  header { padding:14px 20px; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  header h1 { font-size:19px; margin:0 0 4px; }
+  header p { margin:0; font-size:13px; color:#5a554c; }
+  #counts { display:flex; gap:14px; margin-top:8px; font-size:13px; flex-wrap:wrap; }
+  #counts span { padding:2px 10px; border-radius:12px; background:#efe9df; }
+  #counts .ready { background:#e3f2e8; color:var(--green); }
+  #counts .review { background:#fdf1de; color:var(--amber); }
+  #note { padding:10px 20px; font-size:13px; background:#fdf6ec; border-bottom:1px solid var(--line); color:#5a4a2f; }
+  main { padding:18px 20px 60px; }
+  #grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:14px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; cursor:pointer; display:flex; flex-direction:column; }
+  .card:hover { border-color:var(--accent); }
+  .thumb { width:100%; aspect-ratio:4/3; background:#f0ece4 center/contain no-repeat; display:flex; align-items:center; justify-content:center; color:#a89f8f; font-size:12px; }
+  .thumb img { width:100%; height:100%; object-fit:contain; }
+  .body { padding:10px 12px 12px; flex:1; display:flex; flex-direction:column; gap:5px; }
+  .name { font-weight:600; font-size:14px; line-height:1.3; }
+  .name.missing { color:#a89f8f; font-style:italic; font-weight:400; }
+  .row { font-size:12px; color:#5a554c; display:flex; justify-content:space-between; gap:6px; }
+  .badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; width:fit-content; }
+  .badge.ready { background:#e3f2e8; color:var(--green); }
+  .badge.review { background:#fdf1de; color:var(--amber); }
+  .flags { display:flex; flex-wrap:wrap; gap:4px; margin-top:2px; }
+  .flag { font-size:10px; background:#f6e3e0; color:#9b3b2b; padding:1px 6px; border-radius:8px; }
+  #empty, #loading { padding:40px 0; text-align:center; color:#5a554c; }
+  #overlay { position:fixed; inset:0; background:rgba(20,18,14,.55); display:none; align-items:center; justify-content:center; padding:20px; z-index:10; }
+  #overlay.open { display:flex; }
+  #panel { background:#fff; border-radius:12px; max-width:640px; width:100%; max-height:88vh; overflow:auto; padding:20px; }
+  #panel h2 { margin:0 0 4px; font-size:18px; }
+  #panel .big { width:100%; max-height:340px; object-fit:contain; background:#f0ece4; border-radius:8px; margin:10px 0; }
+  #panel dl { display:grid; grid-template-columns: 110px 1fr; gap:6px 10px; font-size:13px; margin:10px 0; }
+  #panel dt { color:#5a554c; }
+  #panel ul { font-size:13px; margin:6px 0; padding-left:18px; }
+  #panel button.close { float:right; border:none; background:none; font-size:20px; cursor:pointer; color:#5a554c; }
+</style>
+</head>
+<body>
+<header>
+  <h1>__CATALOGUE_NAME__ &mdash; products found</h1>
+  <p>What the AI found and grouped from this catalogue. Nothing here is published; a person
+     still reviews and approves before anything appears on a customer site.</p>
+  <div id="counts"></div>
+</header>
+<div id="note">Preview only &mdash; approving items into the real catalogue is a later step, not built yet.</div>
+<main>
+  <div id="loading">Loading&hellip;</div>
+  <div id="empty" style="display:none">No products found yet for this catalogue.</div>
+  <div id="grid"></div>
+</main>
+<div id="overlay"><div id="panel"></div></div>
+<script nonce="__NONCE__">
+const CATALOGUE_ID = "__CATALOGUE_ID__";
+const base = `/api/admin/catalogues/${CATALOGUE_ID}`;
+const grid = document.getElementById("grid");
+const overlay = document.getElementById("overlay");
+const panel = document.getElementById("panel");
+
+function flagLabel(flag) {
+  return flag.replaceAll("_", " ").toLowerCase();
+}
+
+function card(item) {
+  const el = document.createElement("div");
+  el.className = "card";
+  const pct = item.overall_confidence == null ? "?" : Math.round(item.overall_confidence * 100) + "%";
+  const statusClass = item.status === "READY" ? "ready" : "review";
+  el.innerHTML = `
+    <div class="thumb">${item.thumbnail_url ? `<img src="${item.thumbnail_url}" alt="">` : "no picture"}</div>
+    <div class="body">
+      <div class="name ${item.name ? "" : "missing"}">${item.name ?? "No name found"}</div>
+      <div class="row"><span>${item.model_code ?? "no code"}</span><span>p${item.page_numbers.join(", p")}</span></div>
+      <div class="row"><span class="badge ${statusClass}">${item.status === "READY" ? "Ready" : "Needs review"}</span><span>${pct} sure</span></div>
+      ${item.flags.length ? `<div class="flags">${item.flags.map(f => `<span class="flag">${flagLabel(f)}</span>`).join("")}</div>` : ""}
+    </div>`;
+  el.addEventListener("click", () => openDetail(item.id));
+  return el;
+}
+
+async function openDetail(id) {
+  panel.innerHTML = "<p>Loading&hellip;</p>";
+  overlay.classList.add("open");
+  const detail = await (await fetch(`${base}/candidates/${id}`, { credentials: "same-origin" })).json();
+  const name = detail.fields.name?.value ?? "No name found";
+  const image = Object.values(detail.images).find(urls => urls.white)?.white
+    ?? Object.values(detail.images).find(urls => urls.crop)?.crop;
+  const flagLines = detail.flags.map(f => `<li>${flagLabel(f)}</li>`).join("");
+  const reasonLines = detail.reasoning.map(r => `<li>${r}</li>`).join("");
+  const dupLines = detail.duplicate_flags.map(
+    d => `<li>Possibly the same as another candidate (${d.signal.toLowerCase()} match, ${d.status.toLowerCase()})</li>`
+  ).join("");
+  panel.innerHTML = `
+    <button class="close" aria-label="Close">&times;</button>
+    <h2>${name}</h2>
+    <p style="color:#5a554c;font-size:13px;margin:0">Pages ${detail.page_numbers.join(", ")} &middot; ${detail.status === "READY" ? "Ready for review" : "Needs review"}</p>
+    ${image ? `<img class="big" src="${image}" alt="">` : ""}
+    <dl>
+      <dt>Model code</dt><dd>${detail.fields.model_code?.value ?? "&mdash;"}</dd>
+      <dt>Size</dt><dd>${detail.fields.dimensions ? JSON.stringify(detail.fields.dimensions.value) : "&mdash;"}</dd>
+      <dt>Category guess</dt><dd>${detail.fields.category_suggestion?.value ?? "&mdash;"}</dd>
+      <dt>AI saw</dt><dd>${(detail.fields.labels?.value ?? []).join(", ") || "&mdash;"}</dd>
+      <dt>Confidence</dt><dd>${detail.overall_confidence == null ? "&mdash;" : Math.round(detail.overall_confidence * 100) + "%"}</dd>
+    </dl>
+    ${flagLines ? `<p style="margin:10px 0 2px"><b>Worth checking:</b></p><ul>${flagLines}</ul>` : ""}
+    ${dupLines ? `<p style="margin:10px 0 2px"><b>Possible duplicate:</b></p><ul>${dupLines}</ul>` : ""}
+    ${reasonLines ? `<p style="margin:10px 0 2px"><b>Why:</b></p><ul>${reasonLines}</ul>` : ""}
+  `;
+  panel.querySelector(".close").addEventListener("click", () => overlay.classList.remove("open"));
+}
+
+overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.classList.remove("open"); });
+
+async function load() {
+  const data = await (await fetch(`${base}/candidates?limit=100`, { credentials: "same-origin" })).json();
+  document.getElementById("loading").style.display = "none";
+  if (!data.items.length) {
+    document.getElementById("empty").style.display = "block";
+    return;
+  }
+  const ready = data.items.filter(i => i.status === "READY").length;
+  document.getElementById("counts").innerHTML =
+    `<span>${data.total} product${data.total === 1 ? "" : "s"} found</span>` +
+    `<span class="ready">${ready} ready</span>` +
+    `<span class="review">${data.total - ready} need review</span>`;
+  data.items.forEach(item => grid.appendChild(card(item)));
+}
+load().catch(() => { document.getElementById("loading").textContent = "Could not load products."; });
+</script>
+</body>
+</html>

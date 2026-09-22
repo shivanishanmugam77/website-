@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel editor</title>
+<style nonce="__NONCE__">
+  :root { --ink:#1f1d1a; --paper:#f6f3ee; --line:#d8d1c4; --accent:#b84e0a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; color:var(--ink); background:var(--paper); }
+  header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 16px; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  header h1 { font-size:17px; margin:0 8px 0 0; }
+  button { min-height:40px; padding:0 14px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); font:inherit; font-size:14px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger { color:#9b1c1c; }
+  #status { margin-left:auto; font-size:14px; min-height:20px; }
+  #status.error { color:#9b1c1c; font-weight:600; }
+  #hint { padding:6px 16px; font-size:13px; color:#4b463f; }
+  main { display:flex; gap:16px; padding:0 16px 24px; align-items:flex-start; }
+  #stage-wrap { flex:1 1 auto; min-width:0; }
+  #stage { position:relative; display:inline-block; width:100%; line-height:0; background:#fff; border:1px solid var(--line); }
+  #page { width:100%; height:auto; display:block; user-select:none; -webkit-user-drag:none; }
+  #layer { position:absolute; inset:0; touch-action:none; }
+  #layer.adding { cursor:crosshair; }
+  .box { position:absolute; border:3px solid; cursor:move; }
+  .box.selected { border-style:dashed; }
+  .box .tag { position:absolute; left:0; top:0; min-width:26px; padding:1px 7px; font:700 15px/22px system-ui, sans-serif; color:#fff; pointer-events:none; }
+  .handle { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; background:#fff; border:3px solid; border-radius:50%; }
+  .draft { position:absolute; border:3px dashed var(--accent); background:rgba(184,78,10,.12); pointer-events:none; }
+  aside { flex:0 0 300px; max-width:38vw; }
+  aside h2 { font-size:15px; margin:0 0 8px; }
+  #list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+  #list li { display:flex; gap:10px; padding:8px; background:#fff; border:2px solid var(--line); border-radius:10px; cursor:pointer; }
+  #list li.selected { border-color:var(--accent); }
+  #list img { width:72px; height:54px; object-fit:cover; border-radius:6px; background:#eee; flex:none; }
+  #list .chip { display:inline-block; min-width:22px; padding:0 6px; border-radius:11px; color:#fff; font-weight:700; font-size:13px; text-align:center; margin-right:6px; }
+  #list .meta { font-size:12px; color:#4b463f; line-height:1.35; overflow:hidden; }
+  #list .badge { font-size:11px; padding:1px 6px; border-radius:8px; background:#fde7d3; color:#7a3306; margin-left:4px; }
+  #empty { font-size:14px; color:#4b463f; }
+  @media (max-width: 800px) { main { flex-direction:column; } aside { flex:none; max-width:none; width:100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Panel editor</h1>
+  <button id="prev" type="button">&lsaquo; Previous page</button>
+  <span id="where">Page __PAGE_NUMBER__</span>
+  <button id="next" type="button">Next page &rsaquo;</button>
+  <button id="add" type="button" aria-pressed="false">Add a panel</button>
+  <button id="delete" type="button" class="danger" disabled>Delete selected</button>
+  <button id="undo" type="button">Undo</button>
+  <span id="status" role="status" aria-live="polite"></span>
+</header>
+<div id="hint">Drag a box to move it. Drag its round handles to resize it. Choose &ldquo;Add a panel&rdquo; and drag over a picture to draw a new box. Delete removes the selected box; Ctrl+Z undoes the last change. Changes save automatically.</div>
+<main>
+  <div id="stage-wrap">
+    <div id="stage">
+      <img id="page" alt="The catalogue page" draggable="false">
+      <div id="layer"></div>
+    </div>
+  </div>
+  <aside>
+    <h2>Panels on this page</h2>
+    <ul id="list"></ul>
+    <p id="empty" hidden>No panels on this page yet. Use &ldquo;Add a panel&rdquo; to draw one.</p>
+  </aside>
+</main>
+<script nonce="__NONCE__">
+"use strict";
+const CATALOGUE_ID = "__CATALOGUE_ID__";
+const PAGE = __PAGE_NUMBER__;
+const API = "/api/admin/catalogues/" + CATALOGUE_ID;
+const COLOURS = ["#e62828", "#1e6eeb", "#14a546", "#f09600", "#963cc8"];
+const MIN_SIDE = 20; // page pixels; the server enforces the same limit
+
+// BEGIN GEOMETRY (pure functions on [left, top, right, bottom] in page pixels)
+function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+function moveBox(b, dx, dy, W, H) {
+  const w = b[2] - b[0], h = b[3] - b[1];
+  const x0 = clamp(b[0] + dx, 0, W - w), y0 = clamp(b[1] + dy, 0, H - h);
+  return [x0, y0, x0 + w, y0 + h];
+}
+function resizeBox(b, handle, dx, dy, W, H) {
+  let x0 = b[0], y0 = b[1], x1 = b[2], y1 = b[3];
+  if (handle.indexOf("w") >= 0) x0 = clamp(x0 + dx, 0, x1 - MIN_SIDE);
+  if (handle.indexOf("e") >= 0) x1 = clamp(x1 + dx, x0 + MIN_SIDE, W);
+  if (handle.indexOf("n") >= 0) y0 = clamp(y0 + dy, 0, y1 - MIN_SIDE);
+  if (handle.indexOf("s") >= 0) y1 = clamp(y1 + dy, y0 + MIN_SIDE, H);
+  return [x0, y0, x1, y1];
+}
+function boxFromDrag(ax, ay, bx, by, W, H) {
+  return [clamp(Math.min(ax, bx), 0, W), clamp(Math.min(ay, by), 0, H),
+          clamp(Math.max(ax, bx), 0, W), clamp(Math.max(ay, by), 0, H)];
+}
+function bigEnough(b) { return b[2] - b[0] >= MIN_SIDE && b[3] - b[1] >= MIN_SIDE; }
+function sameBox(a, b) { return a.every(function (v, i) { return Math.round(v) === Math.round(b[i]); }); }
+// END GEOMETRY
+
+const els = {
+  img: document.getElementById("page"), layer: document.getElementById("layer"),
+  list: document.getElementById("list"), empty: document.getElementById("empty"),
+  status: document.getElementById("status"), where: document.getElementById("where"),
+  prev: document.getElementById("prev"), next: document.getElementById("next"),
+  add: document.getElementById("add"), del: document.getElementById("delete"),
+  undo: document.getElementById("undo"),
+};
+const state = { panels: [], selected: null, adding: false, busy: false, drag: null, pages: null };
+
+function setStatus(text, isError) {
+  els.status.textContent = text || "";
+  els.status.className = isError ? "error" : "";
+}
+function messageFrom(response, data) {
+  if (response.status === 401) return "Your sign-in has expired. Sign in again at /api/docs, then reload this page.";
+  if (data && typeof data.detail === "string") return data.detail;
+  if (data && Array.isArray(data.detail)) return "That change was not accepted.";
+  return "Something went wrong (" + response.status + ").";
+}
+async function call(method, path, body) {
+  const options = { method: method, credentials: "same-origin", headers: {} };
+  if (body !== undefined) { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body); }
+  const response = await fetch(API + path, options);
+  let data = null;
+  try { data = await response.json(); } catch (e) { data = null; }
+  if (!response.ok) throw new Error(messageFrom(response, data));
+  return data;
+}
+
+function scale() { return els.img.clientWidth / els.img.naturalWidth; }
+function pageSize() { return [els.img.naturalWidth, els.img.naturalHeight]; }
+function colour(index) { return COLOURS[(index - 1) % COLOURS.length]; }
+function place(el, box) {
+  const s = scale();
+  el.style.left = box[0] * s + "px"; el.style.top = box[1] * s + "px";
+  el.style.width = (box[2] - box[0]) * s + "px"; el.style.height = (box[3] - box[1]) * s + "px";
+}
+
+const HANDLES = { nw: [0, 0], n: [50, 0], ne: [100, 0], e: [100, 50], se: [100, 100], s: [50, 100], sw: [0, 100], w: [0, 50] };
+const CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
+
+function render() {
+  els.layer.textContent = "";
+  els.layer.className = state.adding ? "adding" : "";
+  state.panels.forEach(function (panel) {
+    const drag = state.drag && state.drag.id === panel.id ? state.drag.current : null;
+    const box = drag || panel.bbox;
+    const el = document.createElement("div");
+    el.className = "box" + (panel.id === state.selected ? " selected" : "");
+    el.dataset.id = panel.id;
+    el.style.borderColor = colour(panel.index);
+    place(el, box);
+    const tag = document.createElement("div");
+    tag.className = "tag"; tag.textContent = String(panel.index); tag.style.background = colour(panel.index);
+    el.appendChild(tag);
+    if (panel.id === state.selected) {
+      Object.keys(HANDLES).forEach(function (name) {
+        const h = document.createElement("div");
+        h.className = "handle"; h.dataset.handle = name;
+        h.style.left = HANDLES[name][0] + "%"; h.style.top = HANDLES[name][1] + "%";
+        h.style.borderColor = colour(panel.index); h.style.cursor = CURSORS[name];
+        el.appendChild(h);
+      });
+    }
+    els.layer.appendChild(el);
+  });
+  if (state.drag && state.drag.kind === "draw") {
+    const draft = document.createElement("div");
+    draft.className = "draft"; place(draft, state.drag.current); els.layer.appendChild(draft);
+  }
+  els.del.disabled = state.busy || !state.selected;
+  els.undo.disabled = state.busy;
+  els.add.className = state.adding ? "on" : "";
+  els.add.setAttribute("aria-pressed", state.adding ? "true" : "false");
+}
+
+function renderList() {
+  els.list.textContent = "";
+  els.empty.hidden = state.panels.length > 0;
+  state.panels.forEach(function (panel) {
+    const li = document.createElement("li");
+    li.className = panel.id === state.selected ? "selected" : "";
+    li.dataset.id = panel.id;
+    const img = document.createElement("img");
+    img.src = panel.url; img.alt = "Panel " + panel.index;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const title = document.createElement("div");
+    const chip = document.createElement("span");
+    chip.className = "chip"; chip.textContent = String(panel.index); chip.style.background = colour(panel.index);
+    title.appendChild(chip);
+    title.appendChild(document.createTextNode(panel.width_px + " \u00d7 " + panel.height_px));
+    if (panel.origin === "AI_HUMAN_REVIEW" || panel.origin === "HUMAN") {
+      const badge = document.createElement("span");
+      badge.className = "badge"; badge.textContent = panel.origin === "HUMAN" ? "added by you" : "adjusted";
+      title.appendChild(badge);
+    }
+    meta.appendChild(title);
+    const text = document.createElement("div");
+    text.textContent = panel.text.slice(0, 3).join(" \u00b7 ");
+    meta.appendChild(text);
+    li.appendChild(img); li.appendChild(meta);
+    els.list.appendChild(li);
+  });
+}
+
+function refresh(panels, message) {
+  state.panels = panels;
+  if (!panels.some(function (p) { return p.id === state.selected; })) state.selected = null;
+  render(); renderList();
+  setStatus(message || "");
+}
+
+async function run(action, message) {
+  if (state.busy) return;
+  state.busy = true; render();
+  setStatus("Saving\u2026");
+  try {
+    refresh(await action(), message);
+  } catch (error) {
+    setStatus(error.message, true);
+    try { refresh(await call("GET", "/pages/" + PAGE + "/panels")); setStatus(error.message, true); } catch (e) { /* keep the first message */ }
+  } finally {
+    state.busy = false; render();
+  }
+}
+
+function pointerToPage(event) {
+  const rect = els.layer.getBoundingClientRect();
+  const s = scale();
+  return [(event.clientX - rect.left) / s, (event.clientY - rect.top) / s];
+}
+
+els.layer.addEventListener("pointerdown", function (event) {
+  if (state.busy || event.button > 0) return;
+  const point = pointerToPage(event);
+  const handleEl = event.target.closest("[data-handle]");
+  const boxEl = event.target.closest(".box");
+  if (state.adding && !handleEl) {
+    state.drag = { kind: "draw", start: point, current: [point[0], point[1], point[0], point[1]] };
+  } else if (handleEl && boxEl) {
+    const panel = state.panels.find(function (p) { return p.id === boxEl.dataset.id; });
+    state.drag = { kind: "resize", id: panel.id, handle: handleEl.dataset.handle, start: point, origin: panel.bbox.slice(), current: panel.bbox.slice() };
+  } else if (boxEl) {
+    const panel = state.panels.find(function (p) { return p.id === boxEl.dataset.id; });
+    state.selected = panel.id;
+    state.drag = { kind: "move", id: panel.id, start: point, origin: panel.bbox.slice(), current: panel.bbox.slice() };
+    renderList();
+  } else {
+    state.selected = null; renderList();
+  }
+  if (state.drag) els.layer.setPointerCapture(event.pointerId);
+  render();
+});
+
+els.layer.addEventListener("pointermove", function (event) {
+  const drag = state.drag;
+  if (!drag) return;
+  const p = pointerToPage(event), size = pageSize();
+  const dx = p[0] - drag.start[0], dy = p[1] - drag.start[1];
+  if (drag.kind === "move") drag.current = moveBox(drag.origin, dx, dy, size[0], size[1]);
+  else if (drag.kind === "resize") drag.current = resizeBox(drag.origin, drag.handle, dx, dy, size[0], size[1]);
+  else drag.current = boxFromDrag(drag.start[0], drag.start[1], p[0], p[1], size[0], size[1]);
+  render();
+});
+
+function finishDrag() {
+  const drag = state.drag;
+  state.drag = null;
+  if (!drag) return;
+  const box = drag.current.map(Math.round);
+  if (drag.kind === "draw") {
+    state.adding = false;
+    if (bigEnough(box)) run(function () { return call("POST", "/pages/" + PAGE + "/panels", { bbox: box }); }, "Panel added");
+    else { render(); setStatus("That box was too small to be a panel."); }
+    return;
+  }
+  if (sameBox(box, drag.origin)) { render(); return; }
+  run(function () { return call("PATCH", "/pages/" + PAGE + "/panels/" + drag.id, { bbox: box }); }, "Saved");
+}
+els.layer.addEventListener("pointerup", finishDrag);
+els.layer.addEventListener("pointercancel", function () { state.drag = null; render(); });
+
+function deleteSelected() {
+  const id = state.selected;
+  if (!id) return;
+  run(function () { return call("DELETE", "/pages/" + PAGE + "/panels/" + id); }, "Panel deleted (Undo brings it back)");
+}
+function undoLast() {
+  run(function () { return call("POST", "/pages/" + PAGE + "/panels/undo"); }, "Undone");
+}
+els.del.addEventListener("click", deleteSelected);
+els.undo.addEventListener("click", undoLast);
+els.add.addEventListener("click", function () { state.adding = !state.adding; render(); });
+els.list.addEventListener("click", function (event) {
+  const li = event.target.closest("li");
+  if (li) { state.selected = li.dataset.id; render(); renderList(); }
+});
+
+document.addEventListener("keydown", function (event) {
+  if (event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undoLast(); }
+  else if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); deleteSelected(); }
+  else if (event.key === "Escape") { state.drag = null; state.adding = false; state.selected = null; render(); renderList(); }
+});
+window.addEventListener("resize", render);
+
+function goTo(page) { window.location.href = "/api/admin/catalogues/" + CATALOGUE_ID + "/pages/" + page + "/panels/editor"; }
+els.prev.addEventListener("click", function () { goTo(PAGE - 1); });
+els.next.addEventListener("click", function () { goTo(PAGE + 1); });
+els.prev.disabled = PAGE <= 1;
+
+async function start() {
+  setStatus("Loading\u2026");
+  try {
+    const catalogue = await call("GET", "");
+    state.pages = catalogue.page_count;
+    els.where.textContent = "Page " + PAGE + (state.pages ? " of " + state.pages : "");
+    els.next.disabled = !!state.pages && PAGE >= state.pages;
+    state.panels = await call("GET", "/pages/" + PAGE + "/panels");
+    els.img.addEventListener("load", function () { refresh(state.panels); });
+    els.img.src = API + "/pages/" + PAGE + "/image";
+    setStatus("");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+start();
+</script>
+</body>
+</html>

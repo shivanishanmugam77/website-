@@ -1,0 +1,30 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# node
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# runtime data
+storage/*
+!storage/.gitkeep
+ml/models/*
+!ml/models/.gitkeep
+*.log
+.DS_Store
+
+# pictures written by the check_products command
+debug/*
+!debug/.gitkeep
